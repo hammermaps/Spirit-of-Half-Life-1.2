@@ -4,6 +4,10 @@
 #include	"movewith.h"
 #include	"saverestore.h"
 #include	"player.h"
+#include	"game.h"
+
+//LRC- an arbitrary limit. If this number is exceeded we assume there's an infinite loop, and abort.
+#define MAX_MOVEWITH_DEPTH 100
 
 CWorld* g_pWorld = NULL; //LRC
 
@@ -49,8 +53,14 @@ void UTIL_AddToAssistList(CBaseEntity* pEnt)
 	//	ALERT(at_console, "Added %s \"%s\" to AssistList, length now %d\n", STRING(pEnt->pev->classname), STRING(pEnt->pev->targetname), count);
 }
 
-void HandlePostAssist(CBaseEntity* pEnt)
+void HandlePostAssist(CBaseEntity* pEnt, int depth = 0)
 {
+	if (depth > MAX_MOVEWITH_DEPTH)
+	{
+		ALERT(at_error, "HandlePostAssist: MoveWith hierarchy too deep (possible cycle)!\n");
+		return;
+	}
+
 	if (pEnt->m_iLFlags & LF_POSTASSISTVEL)
 	{
 		//		ALERT(at_console, "RestoreVel %s: orign %f %f %f, velocity was %f %f %f, back to %f %f %f\n",
@@ -77,7 +87,7 @@ void HandlePostAssist(CBaseEntity* pEnt)
 	}
 	CBaseEntity* pChild;
 	for (pChild = pEnt->m_pChildMoveWith; pChild != NULL; pChild = pChild->m_pSiblingMoveWith)
-		HandlePostAssist(pChild);
+		HandlePostAssist(pChild, depth + 1);
 }
 
 // returns 0 if no desired settings needed, else returns 1
@@ -103,12 +113,21 @@ int ApplyDesiredSettings(CBaseEntity* pListMember)
 	if (pListMember->m_iLFlags & LF_DESIRED_INFO)
 	{
 		pListMember->m_iLFlags &= ~LF_DESIRED_INFO;
-		ALERT(at_debug, "DesiredInfo: pos %f %f %f, vel %f %f %f. Child pos %f %f %f, vel %f %f %f\n\n",
-		      pListMember->pev->origin.x, pListMember->pev->origin.y, pListMember->pev->origin.z,
-		      pListMember->pev->velocity.x, pListMember->pev->velocity.y, pListMember->pev->velocity.z,
-		      pListMember->m_pChildMoveWith->pev->origin.x, pListMember->m_pChildMoveWith->pev->origin.y,
-		      pListMember->m_pChildMoveWith->pev->origin.z, pListMember->m_pChildMoveWith->pev->velocity.x,
-		      pListMember->m_pChildMoveWith->pev->velocity.y, pListMember->m_pChildMoveWith->pev->velocity.z);
+		if (pListMember->m_pChildMoveWith)
+		{
+			ALERT(at_debug, "DesiredInfo: pos %f %f %f, vel %f %f %f. Child pos %f %f %f, vel %f %f %f\n\n",
+			      pListMember->pev->origin.x, pListMember->pev->origin.y, pListMember->pev->origin.z,
+			      pListMember->pev->velocity.x, pListMember->pev->velocity.y, pListMember->pev->velocity.z,
+			      pListMember->m_pChildMoveWith->pev->origin.x, pListMember->m_pChildMoveWith->pev->origin.y,
+			      pListMember->m_pChildMoveWith->pev->origin.z, pListMember->m_pChildMoveWith->pev->velocity.x,
+			      pListMember->m_pChildMoveWith->pev->velocity.y, pListMember->m_pChildMoveWith->pev->velocity.z);
+		}
+		else
+		{
+			ALERT(at_debug, "DesiredInfo: pos %f %f %f, vel %f %f %f. No child.\n\n",
+			      pListMember->pev->origin.x, pListMember->pev->origin.y, pListMember->pev->origin.z,
+			      pListMember->pev->velocity.x, pListMember->pev->velocity.y, pListMember->pev->velocity.z);
+		}
 	}
 
 	if (pListMember->m_iLFlags & LF_DESIRED_POSTASSIST)
@@ -127,8 +146,14 @@ int ApplyDesiredSettings(CBaseEntity* pListMember)
 	return 1;
 }
 
-void AssistChildren(CBaseEntity* pEnt, Vector vecAdjustVel, Vector vecAdjustAVel)
+void AssistChildren(CBaseEntity* pEnt, Vector vecAdjustVel, Vector vecAdjustAVel, int depth = 0)
 {
+	if (depth > MAX_MOVEWITH_DEPTH)
+	{
+		ALERT(at_error, "AssistChildren: MoveWith hierarchy too deep (possible cycle)!\n");
+		return;
+	}
+
 	CBaseEntity* pChild;
 	for (pChild = pEnt->m_pChildMoveWith; pChild != NULL; pChild = pChild->m_pSiblingMoveWith)
 	{
@@ -150,7 +175,7 @@ void AssistChildren(CBaseEntity* pEnt, Vector vecAdjustVel, Vector vecAdjustAVel
 		//ALERT(at_console, "AssistChild %s: origin %f %f %f, old vel %f %f %f. fraction %f, new vel %f %f %f, dest %f %f %f\n", STRING(pChild->pev->targetname), pChild->pev->origin.x, pChild->pev->origin.y, pChild->pev->origin.z, pChild->m_vecPostAssistVel.x, pChild->m_vecPostAssistVel.y, pChild->m_vecPostAssistVel.z, fFraction, pChild->pev->velocity.x, pChild->pev->velocity.y, pChild->pev->velocity.z, pChild->pev->origin.x + pChild->pev->velocity.x*gpGlobals->frametime, pChild->pev->origin.y + pChild->pev->velocity.y*gpGlobals->frametime, pChild->pev->origin.z + pChild->pev->velocity.z*gpGlobals->frametime );
 		//ALERT(at_console, "AssistChild %s: origin %f %f %f. velocity was %f %f %f, now %f %f %f\n", STRING(pChild->pev->targetname), pChild->pev->origin.x, pChild->pev->origin.y, pChild->pev->origin.z, pChild->m_vecPostAssistVel.x, pChild->m_vecPostAssistVel.y, pChild->m_vecPostAssistVel.z, pChild->pev->velocity.x, pChild->pev->velocity.y, pChild->pev->velocity.z);
 
-		AssistChildren(pChild, vecAdjustVel, vecAdjustAVel);
+		AssistChildren(pChild, vecAdjustVel, vecAdjustAVel, depth + 1);
 	}
 }
 
@@ -283,16 +308,6 @@ void CheckAssistList(void)
 		return;
 	}
 
-	int count = 0;
-
-	for (pListMember = g_pWorld; pListMember; pListMember = pListMember->m_pAssistLink)
-	{
-		if (pListMember->m_iLFlags & LF_DOASSIST)
-			count++;
-	}
-	//	if (count)
-	//		ALERT(at_console, "CheckAssistList begins, length is %d\n", count);
-	count = 0;
 	pListMember = g_pWorld;
 
 	while (pListMember->m_pAssistLink) // handle the remaining entries in the list
@@ -310,9 +325,6 @@ void CheckAssistList(void)
 			pListMember = pListMember->m_pAssistLink;
 		}
 	}
-
-	//	if (count)
-	//		ALERT(at_console, "CheckAssistList complete, %d ents checked\n", count);
 }
 
 // called every frame, by PostThink
@@ -328,6 +340,7 @@ void CheckDesiredList(void)
 	if (!g_pWorld)
 	{
 		ALERT(at_console, "CheckDesiredList has no AssistList!\n");
+		g_doingDesired = FALSE;
 		return;
 	}
 	pListMember = g_pWorld;
@@ -431,7 +444,7 @@ void UTIL_AssignOrigin(CBaseEntity* pEntity, const Vector vecOrigin, BOOL bIniti
 {
 	//	ALERT(at_console, "AssignOrigin before %f, after %f\n", pEntity->pev->origin.x, vecOrigin.x);
 	Vector vecDiff = vecOrigin - pEntity->pev->origin;
-	if (vecDiff.Length() > 0.01 && CVAR_GET_FLOAT("sohl_mwdebug"))
+	if (vecDiff.Length() > 0.01 && mw_debug.value)
 		ALERT(at_debug, "AssignOrigin %s %s: (%f %f %f) goes to (%f %f %f)\n",STRING(pEntity->pev->classname),
 		      STRING(pEntity->pev->targetname), pEntity->pev->origin.x, pEntity->pev->origin.y, pEntity->pev->origin.z,
 		      vecOrigin.x, vecOrigin.y, vecOrigin.z);
@@ -491,7 +504,7 @@ void UTIL_SetAngles(CBaseEntity* pEntity, const Vector vecAngles)
 void UTIL_SetAngles(CBaseEntity* pEntity, const Vector vecAngles, BOOL bInitiator)
 {
 	Vector vecDiff = vecAngles - pEntity->pev->angles;
-	if (vecDiff.Length() > 0.01 && CVAR_GET_FLOAT("sohl_mwdebug"))
+	if (vecDiff.Length() > 0.01 && mw_debug.value)
 		ALERT(at_debug, "SetAngles %s %s: (%f %f %f) goes to (%f %f %f)\n",STRING(pEntity->pev->classname),
 		      STRING(pEntity->pev->targetname), pEntity->pev->angles.x, pEntity->pev->angles.y, pEntity->pev->angles.z,
 		      vecAngles.x, vecAngles.y, vecAngles.z);
@@ -524,9 +537,6 @@ void UTIL_SetAngles(CBaseEntity* pEntity, const Vector vecAngles, BOOL bInitiato
 		}
 	}
 }
-
-//LRC- an arbitrary limit. If this number is exceeded we assume there's an infinite loop, and abort.
-#define MAX_MOVEWITH_DEPTH 100
 
 //LRC- for use in supporting movewith. Tell the entity that whatever it's moving with is about to change velocity.
 // loopbreaker is there to prevent the game from hanging...
@@ -663,7 +673,7 @@ void UTIL_SetMoveWithAvelocity(CBaseEntity* pEnt, const Vector vecSet, int loopb
 			sloopbreaker--;
 			if (sloopbreaker <= 0)
 			{
-				ALERT(at_error, "SetMoveWithVelocity: Infinite sibling list for MoveWith!");
+				ALERT(at_error, "SetMoveWithAvelocity: Infinite sibling list for MoveWith!");
 				break;
 			}
 		}
