@@ -42,4 +42,7 @@ extern cvar_t	*g_psv_gravity;
 extern cvar_t	*g_psv_aim;
 extern cvar_t	*g_footsteps;
 
+// Spirit of Half-Life Cvars
+extern cvar_t	mw_debug; //LRC - movewith debug output
+
 #endif		// GAME_H
